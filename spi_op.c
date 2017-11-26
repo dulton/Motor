@@ -22,23 +22,94 @@
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-
-static void pabort(const char *s)
-{
-	perror(s);
-	abort();
-}
-
 static const char *device = "/dev/spidev0.0";
 static uint32_t mode;
 static uint8_t bits = 8;
 static uint32_t speed = 2000000;
 static uint16_t delay;
 
+#define SPI_READ 	(0x7F)
+
 int g_SPI_Fd = 0;
 #define SPI_DEBUG
 
+
+uint8_t reverse_byte(uint8_t c)
+{
+	uint8_t s = 0;
+        int i;
+        for (i = 0; i < 8; ++i) {
+                s <<= 1;
+                s |= c & 1;
+                c >>= 1;
+        }
+        return s;
+}
+
+
+int spi_read(uint8_t addr, uint16_t *value)
+{
+	int ret;
+	struct spi_ioc_transfer tr[2];
+	uint16_t result;
+	uint8_t cmd = addr | SPI_READ;
+
+	cmd = reverse_byte(cmd) ;
+
+	memset(tr, 0, sizeof(tr));
+	tr[0].tx_buf = (unsigned long)&cmd;
+	tr[0].rx_buf = 0;
+	tr[0].len = 1;
+	tr[0].delay_usecs = delay;
+	tr[0].speed_hz = speed;
+	tr[0].bits_per_word = bits;
+
+	tr[1].tx_buf = 0;
+	tr[1].rx_buf = (unsigned long)&result;
+	tr[1].len = 2;
+	tr[1].delay_usecs = delay;
+	tr[1].speed_hz = speed;
+	tr[1].bits_per_word = bits;
+
+	ret = ioctl(fd, SPI_IOC_MESSAGE(2), tr);
+	if (ret < 1) {
+		printf("can't send spi message");
+		ret = -1;
+	} else {
+		ret = 0;
+	}
+
+	printf("%.4X ", result);
+	*value = result;
+	return ret;
+}
+
+int spi_write(uint8_t addr, uint16_t value)
+{
+	int ret = 0;
+	uint8_t tx[3] = {0};
+
+	tx[0] = reverse_byte(addr);
+	tx[1] = value >> 8;
+	tx[2] = value;
+
+	struct spi_ioc_transfer tr = {
+		.tx_buf = (unsigned long)tx,
+		.rx_buf = 0,
+		.len = 3,
+		.delay_usecs = delay,
+		.speed_hz = speed,
+		.bits_per_word = bits,
+	};
+	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+	if (ret < 1) {
+		printf("can't send spi message");
+		ret = -1;
+	} else {
+		ret = 0;
+	}
+	return ret;
+}
 
 static void cmd_send(int fd)
 {
@@ -58,28 +129,7 @@ static void cmd_send(int fd)
 	};
 	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
 	if (ret < 1)
-		pabort("aaaacan't send spi message");
-}
-
-static void transfer_send(int fd)
-{
-	int ret;
-	uint8_t tx_1[] = {
-		0x06//, 0x08, 0x7e,
-	};
-	uint8_t rx = 0;
-
-	struct spi_ioc_transfer tr = {
-		.tx_buf = (unsigned long)tx_1,
-		.rx_buf = 0,
-		.len = 1,
-		.delay_usecs = delay,
-		.speed_hz = speed,
-		.bits_per_word = bits,
-	};
-	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
-	if (ret < 1)
-		pabort("aaaacan't send spi message");
+		printf("aaaacan't send spi message");
 }
 
 static void transfer_recv(int fd)
@@ -95,29 +145,29 @@ static void transfer_recv(int fd)
 	memset(buf, 0, sizeof(buf));
 
 	tr[0].tx_buf = (unsigned long)&cmd;
-	tr[0].rx_buf = (unsigned long)NULL;
+	tr[0].rx_buf = (unsigned long)0;
+	tr[0].len = 1;
+	tr[0].delay_usecs = delay;
+	tr[0].speed_hz = speed;
+	tr[0].bits_per_word = bits;
 
-		tr[0].len = 1;
-		tr[0].delay_usecs = delay;
-		tr[0].speed_hz = speed;
-		tr[0].bits_per_word = bits;
-				
-		tr[1].tx_buf = (unsigned long)NULL;
-		tr[1].rx_buf = (unsigned long)buf;
-		tr[1].len = 2;
-		tr[1].delay_usecs = delay;
-		tr[1].speed_hz = speed;
-		tr[1].bits_per_word = bits;
+	tr[1].tx_buf = (unsigned long)0;
+	tr[1].rx_buf = (unsigned long)buf;
+	tr[1].len = 2;
+	tr[1].delay_usecs = delay;
+	tr[1].speed_hz = speed;
+	tr[1].bits_per_word = bits;
 
 	ret = ioctl(fd, SPI_IOC_MESSAGE(2), tr);
 	if (ret < 1)
-		pabort("recv can't send spi message");
+		printf("recv can't send spi message");
 
 	for (ret = 0; ret < 2; ret++) {
 		printf("%.2X ", buf[ret]);
 	}
 	printf("\n");
 }
+
 
 static void print_usage(const char *prog)
 {
@@ -221,7 +271,7 @@ static void parse_opts(int argc, char *argv[])
 	}
 }
 
-
+/*
 int SPI_Write(uint8_t * TxBuf, int len)
 {
 	int ret;
@@ -269,7 +319,7 @@ int SPI_Read(uint8_t * RxBuf, int len)
 
 	return ret;
 }
-
+*/
 int main(int argc, char *argv[])
 {
 	int ret = 0;
